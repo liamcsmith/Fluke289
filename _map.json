@@ -1,0 +1,464 @@
+{
+    "PRIMFUNCTION": {
+        "0": "LIMBO",
+        "1": "V_AC",
+        "2": "MV_AC",
+        "3": "V_DC",
+        "4": "MV_DC",
+        "5": "V_AC_OVER_DC",
+        "6": "V_DC_OVER_AC",
+        "7": "V_AC_PLUS_DC",
+        "8": "MV_AC_OVER_DC",
+        "9": "MV_DC_OVER_AC",
+        "10": "MV_AC_PLUS_DC",
+        "11": "A_AC",
+        "12": "MA_AC",
+        "13": "UA_AC",
+        "14": "A_DC",
+        "15": "MA_DC",
+        "16": "UA_DC",
+        "17": "A_AC_OVER_DC",
+        "18": "A_DC_OVER_AC",
+        "19": "A_AC_PLUS_DC",
+        "20": "MA_AC_OVER_DC",
+        "21": "MA_DC_OVER_AC",
+        "22": "MA_AC_PLUS_DC",
+        "23": "UA_AC_OVER_DC",
+        "24": "UA_DC_OVER_AC",
+        "25": "UA_AC_PLUS_DC",
+        "26": "TEMPERATURE",
+        "27": "OHMS",
+        "28": "CONDUCTANCE",
+        "29": "CONTINUITY",
+        "30": "CAPACITANCE",
+        "31": "DIODE_TEST",
+        "32": "V_AC_LOZ",
+        "33": "OHMS_LOW",
+        "34": "CAL_V_DC_LOZ",
+        "35": "CAL_AD_GAIN_X2",
+        "36": "CAL_AD_GAIN_X1",
+        "37": "CAL_RMS",
+        "38": "CAL_FILT_AMP",
+        "39": "CAL_DC_AMP_X5",
+        "40": "CAL_DC_AMP_X10",
+        "41": "CAL_NINV_AC_AMP",
+        "42": "CAL_ISRC_500NA",
+        "43": "CAL_COMP_TRIM_MV_DC",
+        "44": "CAL_ACDC_AC_COMP",
+        "45": "CAL_V_AC_LOZ",
+        "46": "CAL_V_AC_PEAK",
+        "47": "CAL_MV_AC_PEAK",
+        "48": "CAL_TEMPERATURE"
+    },
+    "SECFUNCTION": {
+        "0": "NONE",
+        "1": "HERTZ",
+        "2": "DUTY_CYCLE",
+        "3": "PULSE_WIDTH",
+        "4": "DBM",
+        "5": "DBV",
+        "6": "DBM_HERTZ",
+        "7": "DBV_HERTZ",
+        "8": "CREST_FACTOR",
+        "9": "PEAK_MIN_MAX"
+    },
+    "AUTORANGE": {
+        "1": "AUTO",
+        "0": "MANUAL"
+    },
+    "UNIT": {
+        "0": "NONE",
+        "1": "VDC",
+        "2": "VAC",
+        "3": "VAC_PLUS_DC",
+        "4": "V",
+        "5": "ADC",
+        "6": "AAC",
+        "7": "AAC_PLUS_DC",
+        "8": "A",
+        "9": "OHM",
+        "10": "SIE",
+        "11": "Hz",
+        "12": "S",
+        "13": "F",
+        "14": "CEL",
+        "15": "FAR",
+        "16": "PCT",
+        "17": "dB",
+        "18": "dBV",
+        "19": "dBm",
+        "20": "CREST_FACTOR"
+    },
+    "JACKNAME": {
+        "0": "AMPS",
+        "1": "m_uAMPS"
+    },
+    "RSOB": {
+        "0": "LIMBO",
+        "1": "0",
+        "2": "1",
+        "3": "2",
+        "4": "3",
+        "5": "4",
+        "6": "5",
+        "7": "6",
+        "8": "7",
+        "9": "8",
+        "10": "9",
+        "11": "NUM",
+        "12": "INVALID"
+    },
+    "RECORDTYPE": {
+        "0": "INPUT",
+        "1": "INTERVAL"
+    },
+    "ISSTABLEFLAG": {
+        "0": "UNSTABLE",
+        "1": "STABLE"
+    },
+    "TRANSIENTSTATE": {
+        "0": "NON_T",
+        "1": "RANGE_UP",
+        "2": "RANGE_DOWN",
+        "3": "OVERLOAD",
+        "4": "OPEN_TC"
+    },
+    "LCDMODESTATE": {
+        "0": "ON",
+        "1": "OFF"
+    },
+    "LANG": {
+        "0": "ENGLISH",
+        "1": "GERMAN",
+        "2": "FRENCH",
+        "3": "SPANISH",
+        "4": "ITALIAN",
+        "5": "JAPANESE",
+        "6": "CHINESE"
+    },
+    "STATE": {
+        "0": "INACTIVE",
+        "1": "INVALID",
+        "2": "NORMAL",
+        "3": "BLANK",
+        "4": "DISCHARGE",
+        "5": "OL",
+        "6": "OL_MINUS",
+        "7": "OPEN_TC"
+    },
+    "ATTRIBUTE": {
+        "0": "NONE",
+        "1": "OPEN_CIRCUIT",
+        "2": "SHORT_CIRCUIT",
+        "3": "GLITCH_CIRCUIT",
+        "4": "GOOD_DIODE",
+        "5": "LO_OHMS",
+        "6": "NEGATIVE_EDGE",
+        "7": "POSITIVE_EDGE",
+        "8": "HIGH_CURRENT"
+    },
+    "FILEMODE": {
+        "0": "READ",
+        "1": "APPEND",
+        "2": "TRUNCATE"
+    },
+    "BEEPERTESTSTATE": {
+        "1": "ON",
+        "0": "OFF"
+    },
+    "MEMSIZE": {
+        "1": "1",
+        "2": "2",
+        "4": "4"
+    },
+    "MODE": {
+        "0": "NONE",
+        "1": "AUTO_HOLD",
+        "2": "AUTO_SAVE",
+        "4": "HOLD",
+        "8": "LOW_PASS_FILTER",
+        "16": "MIN_MAX_AVG",
+        "32": "RECORD",
+        "64": "REL",
+        "128": "REL_PERCENT",
+        "256": "CALIBRATION"
+    },
+    "READINGID": {
+        "1": "LIVE",
+        "2": "PRIMARY",
+        "3": "SECONDARY",
+        "4": "REL_LIVE",
+        "5": "BARGRAPH",
+        "7": "MINIMUM",
+        "8": "MAXIMUM",
+        "9": "AVERAGE",
+        "11": "REL_REFERENCE",
+        "13": "TEMP_OFFSET",
+        "12": "DB_REF"
+    },
+    "SESSIONTYPE": {
+        "0": "ALL",
+        "1": "RECORDED",
+        "2": "MIN_MAX",
+        "3": "PEAK",
+        "4": "MEASUREMENT"
+    },
+    "XAJACKNAME": {
+        "0": "AMPS",
+        "1": "m_uAMPS",
+        "2": "BOTH",
+        "3": "NONE",
+        "4": "IGNORE",
+        "5": "JACK"
+    },
+    "TESTPATTERN": {
+        "1": "BLANK",
+        "2": "BOX",
+        "4": "CONTRAST",
+        "3": "SOLID",
+        "5": "HORIZ_LINES",
+        "6": "VERT_LINES",
+        "7": "HORIZ_LINES_OFFSET",
+        "8": "VERT_LINES_OFFSET",
+        "0": "OFF"
+    },
+    "MPDEV_PROPS": {
+        "0": "ablto",
+        "1": "apoffto",
+        "2": "recEventTh"
+    },
+    "JACKPOSITIONSTATUS": {
+        "0": "IN",
+        "1": "OUT"
+    },
+    "MPQ_PROPS": {
+        "0": "COMPANY",
+        "1": "CONTACT",
+        "2": "OPERATOR",
+        "3": "SITE"
+    },
+    "BUTTONNAME": {
+        "657": "INFO",
+        "658": "BACKLIGHT",
+        "654": "HOLD",
+        "655": "MINMAX",
+        "656": "RANGE",
+        "606": "UP",
+        "607": "DOWN",
+        "609": "RIGHT",
+        "608": "LEFT",
+        "650": "F1",
+        "651": "F2",
+        "652": "F3",
+        "653": "F4",
+        "660": "ONOFF"
+    },
+    "CHANNEL": {
+        "0": "0",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7"
+    },
+    "MP_PROPS": {
+        "0": "apoffto",
+        "1": "beeper",
+        "2": "cusDBm",
+        "3": "digits",
+        "4": "ablto",
+        "5": "rsm",
+        "6": "lcdCont",
+        "7": "ahEventTh",
+        "8": "recEventTh",
+        "9": "Clock",
+        "10": "dateFmt",
+        "11": "lang",
+        "12": "numFmt",
+        "13": "timeFmt",
+        "14": "contBeepOS",
+        "15": "contBeep",
+        "16": "dcPol",
+        "17": "hzEdge",
+        "18": "pwPol",
+        "19": "dBmRef",
+        "20": "tempOS",
+        "21": "tempUnit",
+        "22": "SI",
+        "23": "acSmooth"
+    },
+    "SAMPLETIME": {
+        "0": "0",
+        "1": "1",
+        "2": "2",
+        "3": "3",
+        "4": "4",
+        "5": "5",
+        "6": "6",
+        "7": "7",
+        "8": "8",
+        "9": "9",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+        "13": "13",
+        "14": "14",
+        "15": "15"
+    },
+    "PRESSTYPE": {
+        "0": "PRESSED",
+        "1": "HELD_DOWN",
+        "2": "RELEASED",
+        "3": "REPEATED"
+    },
+    "POWERMODE": {
+        "2": "OFF",
+        "3": "OFF_WITH_WAKEUP",
+        "1": "BATTERY_SAVER",
+        "0": "ON",
+        "4": "RESTART"
+    },
+    "LEDSTATE": {
+        "0": "ON",
+        "1": "OFF"
+    },
+    "CALSTATUS": {
+        "0": "INACTIVE",
+        "1": "WAITING",
+        "2": "CALIBRATING",
+        "3": "INVALID_ROTARY_SWITCH",
+        "5": "CAL_COMPLETE"
+    },
+    "RSM": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "BLIGHTVALS": {
+        "1": "OFF",
+        "2": "LOW",
+        "3": "HIGH"
+    },
+    "ACSMOOTH": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "TEMPUNIT": {
+        "0": "C",
+        "1": "F"
+    },
+    "CONTBEEP": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "JACKDETECT": {
+        "1": "OK",
+        "2": "ATTENTION",
+        "3": "WARNING"
+    },
+    "BOLT": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "UPDATEMODE": {
+        "0": "DISABLED",
+        "1": "ENABLED_UNLOCKED",
+        "2": "ENABLED_LOCKED",
+        "3": "RETURNED_TO_ORIGINAL",
+        "4": "SUCCESSFUL"
+    },
+    "DBMREF": {
+        "0": "0",
+        "4": "4",
+        "8": "8",
+        "16": "16",
+        "25": "25",
+        "32": "32",
+        "50": "50",
+        "75": "75",
+        "600": "600",
+        "1000": "1000"
+    },
+    "PWPOL": {
+        "0": "POS",
+        "1": "NEG"
+    },
+    "SI": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "BLVALS": {
+        "6": "FULL",
+        "5": "PARTLY_EMPTY_3",
+        "4": "PARTLY_EMPTY_2",
+        "3": "PARTLY_EMPTY_1",
+        "2": "ALMOST_EMPTY",
+        "1": "EMPTY"
+    },
+    "CONTBEEPOS": {
+        "0": "SHORT",
+        "1": "OPEN"
+    },
+    "ABLTO": {
+        "0": "0",
+        "300": "300",
+        "600": "600",
+        "900": "900",
+        "1200": "1200",
+        "1500": "1500",
+        "1800": "1800"
+    },
+    "HZEDGE": {
+        "0": "RISING",
+        "1": "FALLING"
+    },
+    "MEMVALS": {
+        "0": "EXHAUSTED",
+        "1": "SEVERE",
+        "2": "WARNING",
+        "3": "OK"
+    },
+    "DIGITS": {
+        "4": "4",
+        "5": "5"
+    },
+    "NUMFMT": {
+        "0": "POINT",
+        "1": "COMMA"
+    },
+    "DCPOL": {
+        "0": "POS",
+        "1": "NEG"
+    },
+    "TIMEFMT": {
+        "0": "12",
+        "1": "24"
+    },
+    "APOFFTO": {
+        "0": "0",
+        "900": "900",
+        "1500": "1500",
+        "2100": "2100",
+        "2700": "2700",
+        "3600": "3600"
+    },
+    "DATEFMT": {
+        "0": "MM_DD",
+        "1": "DD_MM"
+    },
+    "BEEPER": {
+        "0": "OFF",
+        "1": "ON"
+    },
+    "RECEVENTTH": {
+        "0": "0",
+        "1": "1",
+        "4": "4",
+        "5": "5",
+        "10": "10",
+        "15": "15",
+        "20": "20",
+        "25": "25"
+    }
+}

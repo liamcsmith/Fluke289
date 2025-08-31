@@ -1,9 +1,9 @@
-import serial
+from serial import Serial
 from datetime import datetime as dtm
 from struct import unpack
 from typing import Literal, Dict, List, Optional
 from gzip import decompress
-from time import sleep
+from time import sleep, gmtime, struct_time
 from PIL import Image, ImageFile
 from io import BytesIO
 
@@ -11,19 +11,42 @@ from io import BytesIO
 class Fluke289:
 
     # The buttons available to "press" remotely on a Fluke289.
-    _buttons = ("HOLD", "ONOFF", "MINMAX", "F1", "UP", "RANGE",
-                "F2", "DOWN", "INFO", "F3", "LEFT", "BACKLIGHT",
-                "F4", "RIGHT")
+    _buttons = (
+        "HOLD", "ONOFF", "MINMAX", "F1", "UP", "LEFT", "RIGHT", "DOWN", "INFO",
+        "RANGE", "F3", "BACKLIGHT", "F4", "F2")
+
+    # All the possible map keys within the scope that I can find, not all of
+    # these correspond to "set"able properties, some are maps used in the
+    # interpretation of output data. These maps are explored via the QEMAP
+    # function, all the fields in this tuple will respond to a QEMAP request.
+    _map_keys = (
+        "PRIMFUNCTION", "SECFUNCTION", "AUTORANGE", "UNIT", "JACKNAME", "RSOB",
+        "RECORDTYPE", "ISSTABLEFLAG", "TRANSIENTSTATE", "LCDMODESTATE", "LANG",
+        "STATE", "ATTRIBUTE", "FILEMODE", "BEEPERTESTSTATE", "MEMSIZE", "MODE",
+        "READINGID", "SESSIONTYPE", "XAJACKNAME", "TESTPATTERN", "MPDEV_PROPS",
+        "JACKPOSITIONSTATUS", "MPQ_PROPS", "BUTTONNAME", "CHANNEL", "MP_PROPS",
+        "SAMPLETIME", "PRESSTYPE", "POWERMODE", "LEDSTATE", "CALSTATUS", "RSM",
+        "BLIGHTVALS", "ACSMOOTH", "TEMPUNIT", "CONTBEEP", "JACKDETECT", "BOLT",
+        "UPDATEMODE", "DBMREF", "PWPOL", "SI", "BLVALS", "CONTBEEPOS", "ABLTO",
+        "HZEDGE", "MEMVALS", "DIGITS", "NUMFMT", "DCPOL", "TIMEFMT", "APOFFTO",
+        "DATEFMT", "BEEPER", "RECEVENTTH")
 
     def __init__(self, port: str):
+
+        # Store the device location.
         self._port = port
+
+        # Map out the device properties.
+        self._map: Dict[str, Dict[int, str]] = {}
+        [self.QEMAP(el) for el in self._map_keys]
+
         return None
 
     @property
-    def _device(self) -> serial.Serial:
+    def _device(self) -> Serial:
 
         # Create the device variable.
-        tmp = serial.Serial(self._port, baudrate=115200, timeout=0.1)
+        tmp = Serial(self._port, baudrate=115200, timeout=0.5)
 
         # Check that the device is open, if it is return it, if not raise an
         # error as the connection has failed.
@@ -33,117 +56,304 @@ class Fluke289:
             msg = "Failed to open device at {}."
             raise Exception(msg.format(self._port))
 
-    def _command(self,
-                 name: str | bytes,
-                 sleep_time: Optional[float] = None) -> bytes:
-
-        if sleep_time is not None:
-            sleep_time = float(sleep_time)
-
-        # Ensure the command is a string (or a bytes encoded string).
-        if not (isinstance(name, bytes) or isinstance(name, str)):
-            raise ValueError("Command should passed as a string!")
-
-        # If name is a byte stream already, then ensure it ends with the b"\r"
-        # block for termination.
-        if isinstance(name, bytes):
-            if not name.endswith(b"\r"):
-                name = name + b"\r"
-
-        # If name is a string, as we would want normally, ensure it ends with
-        # the string "\r", and then encode it to a bytes stream.
-        if isinstance(name, str):
-            if not name.endswith("\r"):
-                name = name + "\r"
-
-            # Encode it to bytes.
-            name = name.encode()
-
-        # Open the device, send the command, and then read the response.
-        with self._device as dev:
-
-            # Sending the command.
-            dev.write(name)
-
-            if sleep_time is not None:
-                sleep(sleep_time)
-
-            # Read in the response.
-            response = dev.readall()
-
-        # The first character of the response is a flag describing the
-        # successfulness of the command, zero is all good, if it is zero then
-        # we strip that part away and continue.
-        match response[0:1].decode():
-            case '0':
-                response = response[1:]
-            case '1':
-                raise IOError("Syntax Error")
-            case '2':
-                raise IOError("Execution error")
-            case '5':
-                raise IOError("No data available")
-            case _:
-                raise IOError("Invalid Response")
-
-        # Strip away the carriage returns at the beginning and end of the
-        # response.
-        response = response.removeprefix(b'\r')
-        response = response.removesuffix(b'\r')
-
-        return response
-
-    # Wrapper method for query that assumes an ascii response.
-    def query(self, query: str | bytes) -> str:
-        return self._command(query).decode()
-
     @property
     def id(self) -> str:
         return self.query("ID")
+
+    @property
+    def model(self) -> str:
+        return self.query("ID").split(",")[0]
+
+    @property
+    def software_version(self) -> str:
+        return self.query("ID").split(",")[1]
+
+    @property
+    def serial_number(self) -> int:
+        return int(self.query("ID").split(",")[2])
+
+    @property
+    def mulitmeter_datetime(self) -> struct_time:
+        return gmtime(int(self.query("QMP CLOCK")))
 
     @property
     def beeper(self) -> str:
         return self.query("QMP BEEPER")
 
     @beeper.setter
-    def beeper(self, val: Literal["ON", "OFF"]):
-        return self.query("MP BEEPER, " + val)
+    def beeper(self, val: Literal["OFF", "ON"]) -> None:
+        self._map_check(val, "BEEPER")
+        self._command("MP BEEPER, {}".format(val))
 
     @property
-    def digits(self) -> str:
-        return self.query("QMP DIGITS")
+    def digits(self) -> int:
+        return int(self.query("QMP DIGITS"))
+
+    @digits.setter
+    def digits(self, val: Literal[4, 5]) -> None:
+        self._map_check("{}".format(val), "DIGITS")
+        self._command("MP DIGITS, {}".format(val))
 
     @property
     def company_name(self) -> str:
         return self.query("QMPQ COMPANY")
 
     @company_name.setter
-    def company_name(self, name: str):
-        self._command("MPQ COMPANY, '" + name + "'")
+    def company_name(self, name: str) -> None:
+        self._command("MPQ COMPANY, '{}'".format(name))
 
     @property
     def operator_name(self) -> str:
         return self.query("QMPQ OPERATOR")
 
     @operator_name.setter
-    def operator_name(self, name: str):
-        return self._command("MPQ OPERATOR, '" + name + "'")
+    def operator_name(self, name: str) -> None:
+        self._command("MPQ OPERATOR, '{}'".format(name))
 
     @property
     def contact_info(self) -> str:
         return self.query("QMPQ CONTACT")
 
     @contact_info.setter
-    def contact_info(self, info: str):
-        return self._command("MPQ CONTACT, '" + info + "'")
+    def contact_info(self, info: str) -> None:
+        self._command("MPQ CONTACT, '{}'".format(info))
 
     @property
     def site_info(self) -> str:
         return self.query("QMPQ SITE")
 
     @site_info.setter
-    def site_info(self, site: str):
-        return self._command("MPQ SITE, '" + site + "'")
+    def site_info(self, site: str) -> None:
+        self._command("MPQ SITE, '{}'".format(site))
+
+    @property
+    def autohold_event_threshold(self):
+        return int(self.query("QMP AHEVENTTH"))
+
+    @property
+    def recording_event_threshold(self) -> int:
+        return int(self.query("QMP RECEVENTTH"))
+
+    @recording_event_threshold.setter
+    def recording_event_threshold(
+            self,
+            val: Literal[0, 1, 4, 5, 10, 15, 20, 25]) -> None:
+        self._map_check("{}".format(val), "RECEVENTTH")
+        self._command("MP RECEVENTTH, {}".format(val))
+
+    @property
+    def language(self) -> str:
+        return self.query("QMP LANG")
+
+    @language.setter
+    def language(self,
+                 val: Literal["ENGLISH", "CHINESE", "JAPANESE", "ITALIAN",
+                              "SPANISH", "GERMAN", "FRENCH"]) -> None:
+        self._map_check(val, "LANG")
+        self._command("MP LANG, {}".format(val))
+
+    @property
+    def RSM(self) -> str:
+        return self.query("QMP RSM")
+
+    @RSM.setter
+    def RSM(self, val: Literal["ON", "OFF"]) -> None:
+        self._map_check(val, "RSM")
+        self._command("MP RSM, {}".format(val))
+
+    @property
+    def ac_smoothing(self) -> str:
+        return self.query("QMP ACSMOOTH")
+
+    @ac_smoothing.setter
+    def ac_smoothing(self, val: Literal["OFF", "ON"]) -> None:
+        self._map_check(val, "ACSMOOTH")
+        self._command("MP ACSMOOTH, {}".format(val))
+
+    @property
+    def pw_polarity(self) -> str:
+        return self.query("QMP PWPOL")
+
+    @pw_polarity.setter
+    def pw_polarity(self, val: Literal["POS", "NEG"]) -> None:
+        self._map_check(val, "PWPOL")
+        self._command("MP PWPOL, {}".format(val))
+
+    @property
+    def temperature_unit(self) -> str:
+        return self.query("QMP TEMPUNIT")
+
+    @temperature_unit.setter
+    def temperature_unit(self, val: Literal["C", "F"]) -> None:
+        self._map_check(val, "TEMPUNIT")
+        self._command("MP TEMPUNIT, {}".format(val))
+
+    @property
+    def SI(self) -> str:
+        return self.query("QMP SI")
+
+    @SI.setter
+    def SI(self, val: Literal["OFF", "ON"]) -> None:
+        self._map_check(val, "SI")
+        self._command("MP SI, {}".format(val))
+
+    @property
+    def lcd_contrast(self) -> int:
+        return int(self.query("QMP LCDCONT"))
+
+    @lcd_contrast.setter
+    def lcd_contrast(
+            self,
+            val: Literal[0, 1, 2, 3, 4, 5, 6, 7, 8,
+                         9, 10, 11, 12, 13, 14, 15]) -> None:
+        if val not in range(16):
+            raise ValueError("Error setting LCD contrast, value should be an"
+                             + "integer between 0 and 15 inclusive.")
+        self._command("MP LCDCONT, {}".format(val))
+
+    @property
+    def continuity_beep_config(self) -> str:
+        return self.query("QMP CONTBEEPOS")
+
+    @continuity_beep_config.setter
+    def continuity_beep_config(self, val: Literal["SHORT", "OPEN"]) -> None:
+        self._map_check(val, "CONTBEEPOS")
+        self._command("MP CONTBEEPOS, {}".format(val))
+
+    @property
+    def continuity_beep(self) -> str:
+        return self.query("QMP CONTBEEP")
+
+    @continuity_beep.setter
+    def continuity_beep(self, val: Literal["OFF", "ON"]) -> None:
+        self._map_check(val, "CONTBEEP")
+        self._command("MP CONTBEEP, {}".format(val))
+
+    @property
+    def date_format(self) -> str:
+        return self.query("QMP DATEFMT")
+
+    @date_format.setter
+    def date_format(self, val: Literal["MM_DD", "DD_MM"]) -> None:
+        self._map_check(val, "DATEFMT")
+        self._command("MP DATEFMT, {}".format(val))
+
+    @property
+    def time_format(self) -> int:
+        return int(self.query("QMP TIMEFMT"))
+
+    @time_format.setter
+    def time_format(self, val: Literal[12, 24]) -> None:
+        self._map_check("{}".format(val), "TIMEFMT")
+        self._command("MP TIMEFMT, {}".format(val))
+
+    @property
+    def DC_polarity(self) -> str:
+        return self.query("QMP DCPOL")
+
+    @DC_polarity.setter
+    def DC_polarity(self, val: Literal["POS", "NEG"]) -> None:
+        self._map_check(val, "DCPOL")
+        self._command("MP DCPOL, {}".format(val))
+
+    @property
+    def temperature_offset(self) -> float:
+        return float(self.query("QMP TEMPOS"))
+
+    @temperature_offset.setter
+    def temperature_offset_shift(self, val: float) -> None:
+
+        if (val < -100.0) or (val > 100.0):
+            msg = "temperature offset should hold a value between -100.0 and" \
+                + " 100.0 inclusive."
+            raise ValueError(msg)
+
+        self._command("MP TEMPOS, {:.1f}".format(val))
+
+    @property
+    def numeric_format(self) -> str:
+        return self.query("QMP NUMFMT")
+
+    @numeric_format.setter
+    def numeric_format(self, val: Literal["POINT", "COMMA"]) -> None:
+        self._map_check(val, "NUMFMT")
+        self._command("MP NUMFMT, {}".format(val))
+
+    @property
+    def decibel_meter_reference(self) -> int:
+        return int(self.query("QMP DBMREF"))
+
+    @decibel_meter_reference.setter
+    def decibel_meter_reference(
+            self,
+            val: Literal[0, 4, 8, 16, 25, 32, 50, 75, 600, 1000]) -> None:
+        self._map_check("{}".format(val), "DBMREF")
+        self._command("MP DBMREF, {}".format(val))
+
+    @property
+    def custom_decibel_meter_reference(self) -> int:
+        return int(self.query("QMP CUSDBM"))
+
+    @custom_decibel_meter_reference.setter
+    def custom_decibel_meter_reference(self, val: int) -> None:
+        if (val not in range(1, 1999)):
+            msg = "Error setting custom_decibel_meter_reference, this should" \
+                + " be an integer between 1 and 1999 inclusive."
+            raise ValueError(msg)
+        self._command("MP CUSDBM, {}".format(val))
+
+    @property
+    def auto_backlight_timeout(self) -> int:
+        return int(self.query("QMP ABLTO"))
+
+    @auto_backlight_timeout.setter
+    def auto_backlight_timeout(
+            self,
+            val: Literal[0, 300, 600, 900, 1200, 1500, 1800]) -> None:
+
+        # Ensure that a suitable value is passed in.
+        if val not in [0, 300, 600, 900, 1200, 1500, 1800]:
+            msg = "Error setting auto backlight timeout, value was {}, " \
+                + "expected one of [0, 300, 600, 900, 1200, 1500, 1800]."
+            raise ValueError(msg.format(val))
+
+        # If an acceptable value was passed, then send the command to update.
+        self._command("MP ABLTO, {}".format(val))
+
+    @property
+    def hertz_edge_side(self) -> str:
+        return self.query("QMP HZEDGE")
+
+    @hertz_edge_side.setter
+    def hertz_edge_side(self,
+                        val: Literal["RISING", "FALLING"]) -> None:
+        self._map_check(val, "HZEDGE")
+        self._command("MP HZEDGE, {}".format(val))
+
+    @property
+    def auto_poweroff_timeout(self) -> int:
+        return int(self.query("QMP APOFFTO"))
+
+    @auto_poweroff_timeout.setter
+    def auto_poweroff_timeout(
+            self,
+            val: Literal[0, 900, 1500, 2100, 2700, 3600]) -> None:
+
+        # Ensure the value is appropriate before sending to the multimeter.
+        if val not in [0, 900, 1500, 2100, 2700, 3600]:
+            msg = "Error setting auto_poweroff_timeout, value given was {}, " \
+                + "but expected one of [0, 900, 1500, 2100, 2700, 3600]."
+            raise ValueError(msg.format(val))
+
+        self._command("MP APOFFTO, {}".format(val))
+
+    @property
+    def primary_value(self) -> float:
+        return float(self.primary_measurement()["value"])
+
+    # Wrapper method for query that assumes an ascii response.
+    def query(self, query: str | bytes) -> str:
+        return self._command(query).decode()
 
     def defaultSetup(self) -> None:
         self._command("DS")
@@ -160,11 +370,27 @@ class Fluke289:
                 "unit": response[1],
                 "state": response[2]}
 
-    @property
-    def primary_value(self) -> float:
-        return float(self.primary_measurement()["value"])
+    def press_button(
+            self,
+            button: Literal["INFO", "BACKLIGHT", "HOLD", "MINMAX", "RANGE",
+                            "UP", "DOWN", "RIGHT", "LEFT", "F1", "F2", "F3",
+                            "F4", "ONOFF"]) -> None:
 
-    def QDDA(self):
+        # Ensure that the button is one of the available options within the
+        # multimeter to be pressed.
+        if button not in self._buttons:
+            raise ValueError("Invalid choice of button.")
+
+        # Send the command to press the button to the multimeter.
+        self._command("PRESS {}".format(button))
+
+    def QDDA(self) -> Dict[str,
+                           float |
+                           List[str] |
+                           int |
+                           str |
+                           "Fluke289RangeData" |
+                           Dict[str, "Fluke289Reading"]]:
         """Query the displayed data in an ASCII format."""
 
         # Get the response in its full form, then split it by comma.
@@ -225,8 +451,10 @@ class Fluke289:
         # # tsval = get_double(bytes, 20)
         # # all bytes parsed
         # return {
-        #     'prim_function': get_map_value('primfunction', current_bytes, 0),
-        #     'sec_function': get_map_value('secfunction', current_bytes, 2),
+        #     'primary_function': get_map_value(
+        #           'primfunction', current_bytes, 0),
+        #     'secondary_function': get_map_value(
+        #           'secfunction', current_bytes, 2),
         #     'auto_range': get_map_value('autorange', current_bytes, 4),
         #     'unit': get_map_value('unit', current_bytes, 6),
         #     'range_max': get_double(current_bytes, 8),
@@ -241,26 +469,6 @@ class Fluke289:
         # }
         # return
 
-    def QRSI(self) -> None:
-        """
-        This is the data supporting an automated recording of measurements
-        made by Fluke 28X the new firmware supports over a dozen 'recordings'
-        each of which has its own identifying number that is shown in the
-        display when viewing memory on the meter. In QRSI use 0-## with ##
-        representing the last recording, not the "identifying number" IOW:
-        there are 0 to nn slots holding recordings that might have YMMV
-        identifiers. Fluke is clever with this. """
-
-        raise NotImplementedError("Not yet available.")
-
-        # ser.write(('qrsi 14' + '\r').encode('utf-8'))
-        # ser.read(2) # the OK 0 and CR
-        # data = (ser.read(999)) #.decode('utf-8'))
-        # for i in range(0 , len(data)):
-        #     print (str(i)+','+str((data[i])))
-        #     #print (str((data[i])))
-        # pass
-
     def QSRR(self) -> None:
         """(QSRR = Query Saved Recorded Readings)
 
@@ -271,7 +479,7 @@ class Fluke289:
         """
 
         raise NotImplementedError("Not yet available.")
-        # ser.write((('qsrr 5, 0').encode('utf-8')))
+        # ser.write((('QSRR 5, 0').encode('utf-8')))
         # ser.write(149)
         # ser.write(('\r').encode('utf-8'))
         # if ser.read(2): # the OK 0 and CR
@@ -282,10 +490,10 @@ class Fluke289:
         #         # print (((data[i])))
         # return
 
-    def QSMR(self):
+    def QSMR(self) -> None:
         """(QSMR = Query Saved Measurement(?) Readings)"""
         # Saved Measurement
-        # res = meter_command('qsmr ' + idx)
+        # res = meter_command('QSMR ' + idx)
         # reading_count = get_u16(res, 36)
 
         # if len(res) < reading_count * 30 + 38:
@@ -294,7 +502,7 @@ class Fluke289:
         #               %d' % (reading_count * 30 + 78, len(res)))
 
         # return {'[seq_no': get_u16(res, 0),
-        #         'un1': get_u16(res, 2),  # 32 bit?
+        #         'un1': get_u16(res, 2)  # 32 bit?
         #         'prim_function': get_map_value('primfunction', res, 4),
         #         'sec_function': get_map_value('secfunction', res, 6),
         #         'auto_range': get_map_value('autorange', res, 8),
@@ -302,7 +510,7 @@ class Fluke289:
         #         'range_max': get_double(res, 12),
         #         'unit_multiplier': get_s16(res, 20),
         #         'bolt': get_map_value('bolt', res, 22),
-        #         'un4': get_u16(res, 24),  # ts?
+        #         'un4': get_u16(res, 24)  # ts?
         #         'un5': get_u16(res, 26),
         #         'un6': get_u16(res, 28),
         #         'un7': get_u16(res, 30),
@@ -314,22 +522,73 @@ class Fluke289:
         #         }
         pass
 
-    def QPSI(self):
+    def QPSI(self) -> None:
         # Saved Peak data?
         pass
 
-    def QMMSI(self):
+    def QMMSI(self) -> None:
         # Saved min/max
         pass
 
-    def QSLS(self):
+    def QRSI(self,
+             recording_number: Optional[int] = None
+             ) -> Dict[str, str | int | struct_time | float]:
+        """
+        This is the data supporting an automated recording of measurements
+        made by Fluke 28X the new firmware supports over a dozen 'recordings'
+        each of which has its own identifying number that is shown in the
+        display when viewing memory on the meter. In QRSI use 0-## with ##
+        representing the last recording, not the "identifying number" IOW:
+        there are 0 to nn slots holding recordings that might have YMMV
+        identifiers. Fluke is clever with this. """
+
+        if (recording_number is None):
+            recording_number = 0
+
+        out = self._command("QRSI {:02d}".format(recording_number))
+
+        # I think that this prefix is common across responses, so it is likely
+        # a header of sorts.
+        out = out.removeprefix(b"#0")
+
+        outdict: Dict[str, str | int | struct_time | float] = {}
+        # Read timestamps (8 bytes long at 4->11 and 12->19)
+        outdict["sequence_number"] = self._read_u16(out, 0)
+        outdict["un2"] = self._read_u16(out, 2)
+        outdict["start_time"] = gmtime(self._read_double(out, 4))
+        outdict["end_time"] = gmtime(self._read_double(out, 12))
+        outdict["sample_interval"] = self._read_double(out, 20)
+        outdict["event_threshold"] = self._read_double(out, 28)
+        outdict["reading_index"] = self._read_double(out, 36)  # 32 bits?
+        outdict["un3"] = self._read_u16(out, 38)
+        outdict["number_of_samples"] = self._read_u16(out, 40)
+        outdict["un4"] = self._read_u16(out, 42)
+        outdict["primary_function"] = self._map[
+            "primfunction"][self._read_u16(out, 44)]
+        outdict["secondary_function"] = self._map[
+            'secfunction'][self._read_u16(out, 46)]
+        outdict["auto_range"] = self._map['autorange'][self._read_u16(out, 48)]
+        outdict["unit"] = self._map['unit'][self._read_u16(out, 50)]
+        outdict["range_max"] = self._read_double(out, 52)
+        outdict["unit_multiplier"] = self._read_i16(out, 60)
+        outdict["bolt"] = self._map['bolt'][self._read_u16(out, 62)]
+        outdict["un8"] = self._read_u16(out, 64)   # ts3?
+        outdict["un9"] = self._read_u16(out, 66)   # ts3?
+        outdict["un10"] = self._read_u16(out, 68)  # ts3?
+        outdict["un11"] = self._read_u16(out, 70)  # ts3?
+        outdict["mode"] = self._read_u16(out, 72)  # [TODO] Fix this enum.
+        outdict["un12"] = self._read_u16(out, 74)
+        return outdict
+
+    def QSLS(self) -> Dict[str, int]:
         out = self.query("QSLS").split(",")
+
         return {"nb_recordings":   int(out[0]),
                 "nb_min_max":      int(out[1]),
                 "nb_peak":         int(out[2]),
                 "nb_measurements": int(out[3])}
 
-    def QueryLCDBitMap(self) -> ImageFile.ImageFile:
+    def QLCDBM(self) -> ImageFile.ImageFile:
         """ Take a screenshot of the current displayed values on the
         multimeter.
 
@@ -347,10 +606,10 @@ class Fluke289:
         at which point a new screenshot is captured and compressed."""
 
         # Request that the screenshot be captured and compressed, returning
-        # the opening 1018 bytes. This command includes a 2.5 second delay to
+        # the opening 1018 bytes. This command includes a 10 µs delay to
         # ensure that the command has time to complete as it is definitely not
         # instantaneous.
-        img: bytes = self._command("QLCDBM 0", 2.5)
+        img: bytes = self._command("QLCDBM 0", 0.01)
         img = img.removeprefix(b"0 #0")
 
         # The maximum returnable information is 1020 bytes minus the number of
@@ -410,36 +669,140 @@ class Fluke289:
 
         return out
 
-    def QSAVNAME(self):
+    def QSAVNAME(self) -> List[str]:
         """ Query Save Names """
-        pass
-        # for i in range(1, 9):
-        #     cmd = 'qsavname ' + str(i - 1) + '\r'
-        #     res = meter_command(cmd)
-        #     print(i, res[0].split('\r')[0], sep=sep)
 
-    def _read_u16(self, input_str: str, offset: int) -> int:
+        out: List[str] = []
+        for save_num in range(8):
+            cmd = 'QSAVNAME {}'.format(save_num)
+            out.append(self.query(cmd))
+
+        return out
+
+    def QEMAP(self, map_name: str) -> None:
+        # Get the map for this given name.
+        out = self.query("QEMAP {}".format(map_name)).split(",")
+
+        submap_length = int(out.pop(0))
+
+        if len(out) != submap_length * 2:
+            raise ValueError("Error parsing QEMAP {}".format(map_name))
+
+        submap = {}
+        for i in range(submap_length):
+            submap[int(out[2*i])] = out[2*i + 1]
+
+        self._map[map_name] = submap
+
+    def _map_check(self, val: str, submap: str) -> None:
+
+        # Look up the relevant scope map within the _map property. Then list
+        # all the acceptable states.
+        valid_vals = self._map[submap].values()
+
+        # Check if the value passed to the checker is an acceptable one, if it
+        # is then return to continue, else raise an error.
+        if val in valid_vals:
+            return
+        else:
+            msg = "Error setting multimeter property: {}. The value given " \
+                + "was \"{}\", acceptable values include: "
+            msg = msg.format(submap, val)
+
+            # Listing out and formating acceptable values for the property in
+            # question.
+            vv_1 = ["\"{}\", ".format(el) for el in valid_vals]
+            vv_2 = ["and \"{}\".".format(el) for el in valid_vals]
+            vv_1 = "".join(vv_1[:-1])
+
+            raise ValueError(msg + vv_1 + vv_2[-1])
+
+    def _command(self,
+                 name: str | bytes,
+                 sleep_time: Optional[float] = None) -> bytes:
+
+        if sleep_time is not None:
+            sleep_time = float(sleep_time)
+
+        # Ensure the command is a string (or a bytes encoded string).
+        if not (isinstance(name, bytes) or isinstance(name, str)):
+            raise ValueError("Command should passed as a string!")
+
+        # If name is a byte stream already, then ensure it ends with the b"\r"
+        # block for termination.
+        if isinstance(name, bytes):
+            if not name.endswith(b"\r"):
+                name += b"\r"
+
+        # If name is a string, as we would want normally, ensure it ends with
+        # the string "\r", and then encode it to a bytes stream.
+        if isinstance(name, str):
+            if not name.endswith("\r"):
+                name += "\r"
+
+            # Encode it to bytes.
+            name = name.encode()
+
+        # Open the device, send the command, and then read the response.
+        with self._device as dev:
+
+            # Sending the command.
+            dev.write(name)
+
+            if sleep_time is not None:
+                sleep(sleep_time)
+
+            # Read in the response.
+            response = dev.readall()
+
+        # The first character of the response is a flag describing the
+        # successfulness of the command, zero is all good, if it is zero then
+        # we strip that part away and continue.
+        match response[0:1].decode():
+            case '0':
+                response = response[1:]
+            case '1':
+                raise IOError("Syntax Error")
+            case '2':
+                raise IOError("Execution error")
+            case '5':
+                raise IOError("No data available")
+            case _:
+                raise IOError("Invalid Response")
+
+        # Strip away the carriage returns at the beginning and end of the
+        # response.
+        response = response.removeprefix(b'\r')
+        response = response.removesuffix(b'\r')
+
+        return response
+
+    def _read_u16(self, input_bytes: bytes, offset: int) -> int:
 
         if offset > 0:
-            endian: str = input_str[offset + 1:offset - 1:-1]
+            endian: bytes = input_bytes[offset + 1:offset - 1:-1]
         else:
-            endian: str = input_str[offset + 1::-1]
+            endian: bytes = input_bytes[offset + 1::-1]
 
         return int(unpack('!H', endian)[0])  # type: ignore
 
-    def press_button(
-            self,
-            button: Literal["HOLD", "ONOFF", "MINMAX", "F1", "UP", "RANGE",
-                            "F2", "DOWN", "INFO", "F3", "LEFT", "BACKLIGHT",
-                            "F4", "RIGHT"]):
+    def _read_i16(self, input_bytes: bytes, offset: int) -> int:
+        val = self._read_u16(input_bytes, offset)
 
-        # Ensure that the button is one of the available options within the
-        # multimeter to be pressed.
-        if button not in self._buttons:
-            raise ValueError("Invalid choice of button.")
+        if ((val & 0x8000) != 0):
+            val = -(0x10000 - val)
+        return val
 
-        # Send the command to press the button to the multimeter.
-        self._command("PRESS " + button)
+    def _read_double(self, input_bytes: bytes, offset: int) -> float:
+        if offset > 0:
+            endian_l = input_bytes[offset + 3:offset - 1:-1]
+        else:
+            endian_l = input_bytes[offset + 3::-1]
+
+        endian_h = input_bytes[offset + 7:offset + 3:-1]
+        endian = endian_l + endian_h
+
+        return round(unpack('!d', endian)[0], 8)
 
 
 class Fluke289RangeData:
@@ -466,5 +829,4 @@ class Fluke289Reading:
 
 if __name__ == "__main__":
     f = Fluke289("/dev/tty.usbserial-A8008ZYm")
-    f.QueryLCDBitMap()
     pass
