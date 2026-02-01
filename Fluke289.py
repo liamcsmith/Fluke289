@@ -28,7 +28,7 @@ http://google.github.io/styleguide/pyguide.html
 from serial import Serial
 from PIL import Image, ImageFile
 from struct import unpack
-from typing import Literal, Dict, List, Any
+from typing import Literal, Dict, List, Any, Callable
 from time import sleep, gmtime, struct_time
 from io import BytesIO
 from gzip import decompress
@@ -44,15 +44,10 @@ class Fluke289:
     _buttons = ("ONOFF", "MINMAX", "UP", "LEFT", "RIGHT", "DOWN", "INFO", "F1",
                 "F2", "F3", "F4", "RANGE", "BACKLIGHT", "HOLD")
 
-    # All the possible map keys within the scope that I can find, not all of
+    # All the possible map keys within the multimeter I can find, not all of
     # these correspond to "set"able properties, some are maps used in the
     # interpretation of output data. These maps are explored via the QEMAP
     # function, all the fields in this tuple will respond to a QEMAP request.
-    _map: Dict[str, Any] = {}
-    if isfile("_map.json"):
-        with open("_map.json") as f:
-            _map = load_json(f)
-
     _map_keys = (
         "PRIMFUNCTION", "SECFUNCTION", "AUTORANGE", "UNIT", "JACKNAME", "RSOB",
         "RECORDTYPE", "ISSTABLEFLAG", "TRANSIENTSTATE", "LCDMODESTATE", "LANG",
@@ -65,6 +60,11 @@ class Fluke289:
         "HZEDGE", "MEMVALS", "DIGITS", "NUMFMT", "DCPOL", "TIMEFMT", "APOFFTO",
         "DATEFMT", "BEEPER", "RECEVENTTH")
 
+    _map: Dict[str, Any] = {}
+    if isfile("_map.json"):
+        with open("_map.json") as f:
+            _map = load_json(f)
+
     def __init__(self, port: str, remap: bool | None = None):
         """Instantiate an interface with a Fluke 289 multimeter.
 
@@ -72,7 +72,7 @@ class Fluke289:
             port [str]: The location of the USB serial device that provides the
                 IR interface with the device.
 
-            remap [bool, Optional]: A flag to signal if the scope parameter
+            remap [bool, Optional]: A flag to signal if the device parameter
                 dictionary should be recalculated, if left blank the dictionary
                 will only be mapped if it does not yet exist in the same
                 working directory as the Fluke289.py file.
@@ -736,7 +736,8 @@ class Fluke289:
         return int(self.query("QMP ABLTO"))
 
     @auto_backlight_timeout.setter
-    def auto_backlight_timeout(self,
+    def auto_backlight_timeout(
+            self,
             val: Literal[0, 300, 600, 900, 1200, 1500, 1800]) -> None:
         """ Device Information: Auto-Backlight Timeout setter.
 
@@ -962,85 +963,161 @@ class Fluke289:
                            str | int | struct_time | float | List["Reading"]]:
         """Query the displayed data in a binary format."""
 
-        out = self._command("QDDB")
-        reading_count = _read_u16(out, 32)
-        expected_length = reading_count * 30 + 34
-        if len(out) != expected_length:
-            msg = "QDDB parse error, expected {} bytes, got {}"
-            raise ValueError(msg.format(expected_length, len(out)))
+        # Send the command to the device.
+        res = self._command("QDDB")
 
-        outdict: Dict[str,
-                      str | int | struct_time | float | List[Reading]] = {}
+        # Checking that the response is the expected length, each respsonse
+        # should have 34 bytes of header, with a number of 30 byte blocks (one
+        # 30 byte block per measurement) following thereafter.
+        num_readings = _read_u16(res, 32)
+        expected_length = num_readings * 30 + 34
+        if len(res) != expected_length:
+            msg = "QDDB parse error, expected {} bytes, got {}."
+            raise ValueError(msg.format(expected_length, len(res)))
 
-        outdict["prim_func"] = self._map["PRIMFUNCTION"][
-            str(_read_u16(out, 0))]
-        outdict["sece_func"] = self._map["SECFUNCTION"][str(_read_u16(out, 2))]
-        outdict["autorange"] = self._map["AUTORANGE"][str(_read_u16(out, 4))]
-        outdict["unit"] = self._map["UNIT"][str(_read_u16(out, 6))]
-        outdict["range_max"] = _read_double(out, 8)
-        outdict["unit_mult"] = _read_i16(out, 16)
-        outdict["bolt"] = self._map["BOLT"][str(_read_u16(out, 18))]
-        outdict["tsval"] = gmtime(_read_double(out, 20))
-        outdict["mode"] = self._map["MODE"][str(_read_u16(out, 28))]
-        outdict["un1"] = _read_u16(out, 30)
-        outdict["readings"] = [Reading("binary",
-                                       out[34+i*30:64+i*30],
-                                       self._map)
-                               for i in range(reading_count)]
-        return outdict
+        # Macro defining decoding of map values and instantiation of Readings.
+        mpr: Callable[[str, int], str] = \
+            lambda key, offs: self._map[key][str(_read_u16(res, offs))]
+        val: Callable[[int], Reading] = lambda i: Reading(
+            "binary", res[(34+(i*30)):(64+(i*30))], self._map)
+
+        return {
+            "primary_function":   mpr("PRIMFUNCTION", 0),
+            "secondary_function": mpr("SECFUNCTION", 2),
+            "autorange":          mpr("AUTORANGE", 4),
+            "unit":               mpr("UNIT", 6),
+            "range_max":          _read_double(res, 8),
+            "unit_mult":          _read_i16(res, 16),
+            "bolt":               mpr("BOLT", 18),
+            "tsval":              gmtime(_read_double(res, 20)),
+            "mode":               mpr("MODE", 28),
+            "un1":                _read_u16(res, 30),
+            "readings":           [val(i) for i in range(num_readings)]
+        }
 
     def QSRR(self) -> None:
         """(QSRR = Query Saved Recorded Readings)
 
-        QSRR is reported to be the function that can access individual
-        "samples" in a recording, presumably with the actual recording
-        identifier obtained from QRSI. I have not been successful in
-        accessing.
+        QSRR is a function that can access individual "samples" in a recording,
+
+        The QSRR command seems to take two numbers, the first identifies the
+        recording with the second the entry in the recording. Acceptable values
+        for the recording identifier (the first number) are the reading_indexes
+        found in the QRSI command output for that given QRSI index, where that
+        index runs from 0 up to the number of recordings (per QSLS) minus 1.
+
+        Response is 146 Bytes long. My current guess here is that the
+        structure is as follows...
+
+        | Offset | nBytes | Type   | Desc                                     |
+        |:-------|:-------|:-------|:-----------------------------------------|
+        |        |        |        | BEGINNING OF RESPONSE                    |
+        | 0      |   8    | double | POSIX timestamp (time at start of sample)|
+        | 8      |   8    | double | POSIX timestamp (time at end of sample)  |
+        |        |        |        | MEASUREMENT BELOW (30 byte segment)      |
+        | 16     |   2    | uint16 | READINGID (maximum always(?))            |
+        | 18     |   8    | double | Value                                    |
+        | 26     |   2    | uint16 | UNIT                                     |
+        | 28     |   2    | int16  | Unit mulitiplier                         |
+        | 30     |   2    | uint16 | Decimal Places                           |
+        | 32     |   2    | uint16 | DIGITS (# digits displayed on multimeter)|
+        | 34     |   2    | uint16 | STATE                                    |
+        | 36     |   2    | uint16 | ATTRIBUTE                                |
+        | 38     |   8    | double | POSIX timestamp (of this measurement)    |
+        |        |        |        | MEASUREMENT BELOW (30 byte segment)      |
+        | 46     |   2    | uint16 | READINGID (maximum always(?))            |
+        | 48     |   8    | double | Value                                    |
+        | 56     |   2    | uint16 | UNIT                                     |
+        | 58     |   2    | int16  | Unit mulitiplier                         |
+        | 60     |   2    | uint16 | Decimal Places                           |
+        | 62     |   2    | uint16 | DIGITS (# digits displayed on multimeter)|
+        | 64     |   2    | uint16 | STATE                                    |
+        | 66     |   2    | uint16 | ATTRIBUTE                                |
+        | 68     |   8    | double | POSIX timestamp (of this measurement)    |
+        |        |        |        | MEASUREMENT BELOW (30 byte segment)      |
+        | 76     |   2    | uint16 | READINGID (maximum always(?))            |
+        | 78     |   8    | double | Value                                    |
+        | 86     |   2    | uint16 | UNIT                                     |
+        | 88     |   2    | int16  | Unit mulitiplier                         |
+        | 90     |   2    | uint16 | Decimal Places                           |
+        | 92     |   2    | uint16 | DIGITS (# digits displayed on multimeter)|
+        | 94     |   2    | uint16 | STATE                                    |
+        | 96     |   2    | uint16 | ATTRIBUTE                                |
+        | 98     |   8    | double | POSIX timestamp (of this measurement)    |
+        |        |        |        | NO IDEA BELOW                            |
+        | 106    |   2    | uint16 | dmm_util: duration {1 4 5 6 7 8 9 10}    |
+        | 108    |   2    | uint16 | 'un2': get_u16(res, 108)                 |
+        |        |        |        | MEASUREMENT BELOW (30 byte segment)      |
+        | 110    |   2    | uint16 | READINGID (maximum always(?))            |
+        | 112    |   8    | double | Value                                    |
+        | 120    |   2    | uint16 | UNIT                                     |
+        | 122    |   2    | int16  | Unit mulitiplier                         |
+        | 124    |   2    | uint16 | Decimal Places                           |
+        | 126    |   2    | uint16 | DIGITS (# digits displayed on multimeter)|
+        | 128    |   2    | uint16 | STATE                                    |
+        | 130    |   2    | uint16 | ATTRIBUTE                                |
+        | 132    |   8    | double | POSIX timestamp (of this measurement)    |
+        |        |        |        | NO IDEA BELOW                            |
+        | 140    |   2    | uint16 | dmm_util: record_type                    |
+        | 142    |   2    | uint16 | dmm_util: isstableflag                   |
+        | 144    |   2    | uint16 | dmm_util: transient_state                |
+        |        |        |        | END OF RESPONSE                          |
+
+        I have a hunch that the u16 at 140 relates to if a value is a sample
+        recorded for an "event" or an "interval" however more testing is needed
+        to confirm this. If the hunch is correct, then when 140 is 1, the
+        reading was taken due to an interval, and when 0 it was taken due to an
+        event. This logic would map to RECORDTYPE within the map.
+
+        If the 140 hunch is correct, then MAYBE 142 would be the ISSTABLEFLAG
+        which is the next item in the map. This is a really big stretch tbh.
         """
 
         raise NotImplementedError("Not yet available.")
-        # ser.write((('QSRR 5, 0').encode('utf-8')))
-        # ser.write(149)
-        # ser.write(('\r').encode('utf-8'))
-        # if ser.read(2): # the OK 0 and CR
-        #     data = (ser.read(999))  # .decode('utf-8'))
-        #     print(data)
-        #     for i in range(0, len(data)):
-        #         print(str(i)+','+str((data[i])))
-        #         # print (((data[i])))
-        # return
 
-    def QSMR(self) -> None:
+    def QSMR(self, idx: int) -> Dict[str, int | str | float | List["Reading"]]:
         """(QSMR = Query Saved Meter/Measurement(?) Readings)"""
-        # Saved Measurement
-        # res = meter_command('QSMR ' + idx)
-        # reading_count = get_u16(res, 36)
 
-        # if len(res) < reading_count * 30 + 38:
-        #     raise ValueError(
-        #         'By app: qsmr parse error, expected at least %d bytes, got
-        #               %d' % (reading_count * 30 + 78, len(res)))
+        # Validating that the slot actually is a valid measurement.
+        last_slot = self.QSLS()["nb_measurements"] - 1
+        msg = "idx should be a non-negative integer not larger than {}, " \
+            + "instead it was {}, which is invalid."
+        if (idx < 0) or (idx > last_slot):
+            raise ValueError(msg.format(last_slot, idx))
 
-        # return {'[seq_no': get_u16(res, 0),
-        #         'un1': get_u16(res, 2)  # 32 bit?
-        #         'prim_function': get_map_value('primfunction', res, 4),
-        #         'sec_function': get_map_value('secfunction', res, 6),
-        #         'auto_range': get_map_value('autorange', res, 8),
-        #         'unit': get_map_value('unit', res, 10),
-        #         'range_max': get_double(res, 12),
-        #         'unit_multiplier': get_s16(res, 20),
-        #         'bolt': get_map_value('bolt', res, 22),
-        #         'un4': get_u16(res, 24)  # ts?
-        #         'un5': get_u16(res, 26),
-        #         'un6': get_u16(res, 28),
-        #         'un7': get_u16(res, 30),
-        #         'mode': get_multimap_value('mode', res, 32),
-        #         'un9': get_u16(res, 34),
-        #         # 36 is reading count
-        #         'readings': parse_readings(res[38:38 + reading_count * 30]),
-        #         'name': res[(38 + reading_count * 30):]
-        #         }
-        raise NotImplementedError("Not yet available.")
+        # Actually running the command given the slot is a valid one.
+        res = self._command("QSMR {}".format(idx))
+
+        # Macro defining decoding of map values and instantiation of Readings.
+        mpr: Callable[[str, int], str] = \
+            lambda key, offs: self._map[key][str(_read_u16(res, offs))]
+        val: Callable[[int], Reading] = lambda i: Reading(
+            "binary", res[(38+(i*30)):(68+(i*30))], self._map)
+
+        # Alias the number of measurements.
+        num_measurements: int = _read_u16(res, 36)
+
+        # Parsing the resposnse into a clean output.
+        return {
+            "sequence_number":    _read_u16(res, 0),
+            "un1":                _read_u16(res, 2),
+            "primary_function":   mpr("PRIMFUNCTION", 4),
+            "secondary_function": mpr("SECFUNCTION", 6),
+            "auto_range":         mpr("AUTORANGE", 8),
+            "unit":               mpr("UNIT", 10),
+            "range_max":          _read_double(res, 12),
+            "unit_multiplier":    _read_i16(res, 20),
+            "bolt":               mpr("BOLT", 22),
+            "un4":                _read_u16(res, 24),
+            "un5":                _read_u16(res, 26),
+            "un6":                _read_u16(res, 28),
+            "un7":                _read_u16(res, 30),
+            "mode":               mpr("MODE", 32),
+            "un9":                _read_u16(res, 34),
+            "num_measurements":   num_measurements,
+            "measurements":       [val(i) for i in range(num_measurements)],
+            "name":               res[(38 + num_measurements * 30):].decode()
+        }
 
     def QPSI(self) -> None:
         """ Query Peak Save(?) Information(?)"""
@@ -1050,9 +1127,8 @@ class Fluke289:
         """ Query Min Max Save(?) Information(?)"""
         raise NotImplementedError("Not yet available.")
 
-    def QRSI(self,
-             recording_number: int | None = None
-             ) -> Dict[str, str | int | struct_time | float]:
+    def QRSI(self, recording_number: int | None = None) \
+            -> Dict[str, str | int | struct_time | float]:
         """ Query Recorded Save(?) Information(?)
         This is the data supporting an automated recording of measurements
         made by Fluke 28X the new firmware supports over a dozen 'recordings'
@@ -1067,43 +1143,58 @@ class Fluke289:
 
         res = self._command("QRSI {:02d}".format(recording_number))
 
-        u16 = _read_u16
-        dbl = _read_double
-        i16 = _read_i16
+        mpr: Callable[[str, int], str] = lambda key, offs: \
+            self._map[key][str(_read_u16(res, offs))]
 
         return {
-            "sequence_number":    u16(res, 0),
-            "un2":                u16(res, 2),
-            "start_time":         gmtime(dbl(res, 4)),
-            "end_time":           gmtime(dbl(res, 12)),
-            "sample_interval":    dbl(res, 20),
-            "event_threshold":    dbl(res, 28),
-            "reading_index":      dbl(res, 36),  # 32 bits?
-            "un3":                u16(res, 38),
-            "number_of_samples":  u16(res, 40),
-            "un4":                u16(res, 42),
-            "primary_function":   self._map["PRIMFUNCTION"][str(u16(res, 44))],
-            "secondary_function": self._map['SECFUNCTION'][str(u16(res, 46))],
-            "auto_range":         self._map['AUTORANGE'][str(u16(res, 48))],
-            "unit":               self._map['UNIT'][str(u16(res, 50))],
-            "range_max":          dbl(res, 52),
-            "unit_multiplier":    i16(res, 60),
-            "bolt":               self._map['BOLT'][str(u16(res, 62))],
-            "un8":                u16(res, 64),  # ts3?
-            "un9":                u16(res, 66),  # ts3?
-            "un10":               u16(res, 68),  # ts3?
-            "un11":               u16(res, 70),  # ts3?
-            "mode":               self._map["MODE"][str(u16(res, 72))],
-            "un12":               u16(res, 74),
+            "sequence_number":    _read_u16(res, 0),
+            "un2":                _read_u16(res, 2),
+            "start_time":         gmtime(_read_double(res, 4)),
+            "end_time":           gmtime(_read_double(res, 12)),
+            "sample_interval":    _read_double(res, 20),
+            "event_threshold":    _read_double(res, 28),
+            "reading_index":      _read_u16(res, 36),
+            "un3":                _read_u16(res, 38),
+            "number_of_samples":  _read_u16(res, 40),
+            "un4":                _read_u16(res, 42),
+            "primary_function":   mpr("PRIMFUNCTION", 44),
+            "secondary_function": mpr('SECFUNCTION', 46),
+            "auto_range":         mpr('AUTORANGE', 48),
+            "unit":               mpr('UNIT', 50),
+            "range_max":          _read_double(res, 52),
+            "unit_multiplier":    _read_i16(res, 60),
+            "bolt":               mpr('BOLT', 62),
+            "un8":                _read_u16(res, 64),
+            "un9":                _read_u16(res, 66),
+            "un10":               _read_u16(res, 68),
+            "un11":               _read_u16(res, 70),
+            "mode":               mpr("MODE", 72),
+            "un12":               _read_u16(res, 74),
             }
 
     def QSLS(self) -> Dict[str, int]:
-        out = self.query("QSLS").split(",")
+        """ Count the saved items available within the multimeter.
 
-        return {"nb_recordings":   int(out[0]),
-                "nb_min_max":      int(out[1]),
-                "nb_peak":         int(out[2]),
-                "nb_measurements": int(out[3])}
+        Args:
+            self: The Fluke289 instance.
+
+        Returns:
+            A dict containing the number of recording, minmax, peak, and
+                measurement entries, with these given in the keys
+                "num_recording", "num_minmax", "num_peak", & "num_measurement"
+                respectively.
+
+        Raises:
+            None.
+        """
+        # Send the command to the device, splitting the output between commas.
+        response = self.query("QSLS").split(",")
+
+        # Identify the distinct parts of the response.
+        return {"num_recording":   int(response[0]),
+                "num_minmax":      int(response[1]),
+                "num_peak":        int(response[2]),
+                "num_measurement": int(response[3])}
 
     def QLCDBM(self) -> ImageFile.ImageFile:
         """ Take a screenshot of the current displayed values on the
@@ -1120,7 +1211,18 @@ class Fluke289:
         zero is used initially, which has the side-effect of actually
         capturing and compressing the screenshot, future reads to increasing
         offsets then read this buffer, until a zero offset request is recieved
-        at which point a new screenshot is captured and compressed."""
+        at which point a new screenshot is captured and compressed.
+
+        Args:
+            self: The Fluke289 instance.
+
+        Returns:
+            An ImageFile instance, which is a user-friendly wrapper for the
+                screenshot.
+
+        Raises:
+            None.
+        """
 
         # Request that the screenshot be captured and compressed, returning
         # the opening 1018 bytes. This command includes a 10 µs delay to
@@ -1188,17 +1290,31 @@ class Fluke289:
 
     def QSAVNAME(self) -> List[str]:
         """ Query Save Names """
-
-        out: List[str] = []
-        for save_num in range(8):
-            cmd = 'QSAVNAME {}'.format(save_num)
-            out.append(self.query(cmd))
-
-        return out
+        # [TODO] WHY range(8) ??????
+        return [self.query("QSAVNAME {}".format(idx)) for idx in range(8)]
 
     def QEMAP(self,
               map_name: str,
-              ) -> None:
+              ) -> Dict[int, str]:
+        """ Query the multimeter parameter setting map.
+
+        Args:
+            self: The Fluke289 instance.
+
+            map_name: A string defining which map within the device should be
+                queried, acceptable values are those within the _map_keys class
+                property.
+
+        Returns:
+            A dict containing the class, note that within this method the _map
+                class property will be updated with the latest version of the
+                reponse for that map key.
+
+        Raises:
+            ValueError if the number of items in the response (which split
+                using commas) does not agree with expectations, as this will
+                cause an error in parsing the segmented response.
+        """
 
         # Get the map for this given name.
         out = self.query("QEMAP {}".format(map_name)).split(",")
@@ -1217,6 +1333,8 @@ class Fluke289:
         # strings.
 
         Fluke289._map[map_name] = submap
+
+        return submap
 
     def _map_check(self,
                    val: str,
@@ -1242,8 +1360,8 @@ class Fluke289:
                 raised, a list of acceptable values should be given within the
                 error that is raised.
         """
-        # Look up the relevant scope map within the _map property. Then list
-        # all the acceptable states.
+        # Look up the relevant multimeter map within the _map property. Then
+        # list all the acceptable states.
         valid_vals = self._map[submap].values()
 
         # Check if the value passed to the checker is an acceptable one, if it
@@ -1264,37 +1382,63 @@ class Fluke289:
             raise ValueError(msg + vv_1 + vv_2[-1])
 
     def _command(self,
-                 name: str | bytes,
+                 cmd: str | bytes,
                  sleep_time: float | None = None,
                  ) -> bytes:
+        """ Internal method for communication with the multimeter.
+
+        Args:
+            self: The Fluke289 instance.
+
+            cmd: A string or bytes instance holding the command to be sent to
+                the multimeter.
+
+            sleep_time: An optional floating point number that facilitates a
+                wait period after sending the command to the device, this is
+                useful when issuing a computationally expensive command to the
+                device, as if the response is requested prior to completion
+                then there may be an issue in interpreting or receiving the
+                response.
+
+        Returns:
+            The response from the device, formatted as a byte array.
+
+        Raises:
+            ValueError if the command given is niether an instance of string
+                type or a byte array type.
+
+            IOError if there is an issue in communicating with the multimeter,
+                the details of this eror are contained within the message and
+                are defined within Fluke's limited interface documentation
+        """
 
         if sleep_time is not None:
             sleep_time = float(sleep_time)
 
         # Ensure the command is a string (or a bytes encoded string).
-        if not (isinstance(name, bytes) or isinstance(name, str)):
+        if not (isinstance(cmd, bytes) or isinstance(cmd, str)):
             raise ValueError("Command should passed as a string!")
 
         # If name is a byte stream already, then ensure it ends with the b"\r"
         # block for termination.
-        if isinstance(name, bytes):
-            if not name.endswith(b"\r"):
-                name += b"\r"
+        if isinstance(cmd, bytes):
+            if not cmd.endswith(b"\r"):
+                cmd += b"\r"
 
         # If name is a string, as we would want normally, ensure it ends with
         # the string "\r", and then encode it to a bytes stream.
-        if isinstance(name, str):
-            if not name.endswith("\r"):
-                name += "\r"
+        if isinstance(cmd, str):
+            if not cmd.endswith("\r"):
+                cmd += "\r"
 
             # Encode it to bytes.
-            name = name.encode()
+            cmd = cmd.encode()
 
         # Open the device, send the command, and then read the response.
         with self as dev:
 
             # Sending the command.
-            dev.write(name)
+            dev.write(cmd)
 
             if sleep_time is not None:
                 sleep(sleep_time)
